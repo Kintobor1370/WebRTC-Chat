@@ -1,0 +1,8 @@
+{
+  "apiKey": "Your API key here",
+  "authDomain": "Your authDomain here",
+  "projectId": "Your project ID here",
+  "storageBucket": "Your storageBucket here",
+  "messagingSenderId": "Your messaging sender ID here",
+  "appId": "Your app ID here"
+}
