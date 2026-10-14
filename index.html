@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>WebRTC Chat</title>
+  </head>
+  <body>
+    <h2>Start your Camera and Microphone</h2>
+    <div class="videos">
+      <span>
+        <h3>Your Stream</h3>
+        <video id="webcamVideo" autoplay playsinline></video>
+      </span>
+      <span>
+        <h3>Remote Stream</h3>
+        <video id="remoteVideo" autoplay playsinline></video>
+      </span>
+    </div>
+
+    <div class="buttons">
+      <button id="camButton">
+      <button id="micButton">
+      <button id="shrButton">
+    </div>
+    <h2>Create a Call</h2>
+    <button id="callButton" disabled>Create</button>
+    <p id="idDisplay"></p>
+
+    <h2>Join the Call</h2>
+    <p>Join the call from a different browser window or device</p>
+    
+    <input id="callInput" />
+    <button id="joinButton" disabled>Join</button>
+    <p id="answerStatus"></p>
+
+    <h2>End the Call</h2>
+
+    <button id="endButton" disabled>End</button>
+
+    <script type="module" src="/main.js"></script>
+  </body>
+</html>
