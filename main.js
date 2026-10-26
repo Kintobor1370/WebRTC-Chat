@@ -104,35 +104,6 @@ callInput.addEventListener('input', (event) => {
   joinButton.disabled = inputValue.trim() === '';
 });
 
-// Placeholder animation setup
-/*
-video.src = 'assets/technical-difficulties-tenna.webm';
-video.width = remoteVideo.offsetWidth;
-video.height = remoteVideo.offsetHeight;
-video.loop = true;
-video.muted = true;
-video.playsInLine = true;
-*/
-
-// Start animation
-/*
-video.oncanplay = () => {
-  video.play();
-  console.log('LOOP');
-}
-
-// Initialise placeholder
-video.onplay = () => {
-  placeholderStream = video.captureStream ? video.captureStream() : video.mozCaptureStream();
-  placeholderVideoTrack = placeholderStream.getVideoTracks()[0];
-  videoSender = pc.addTrack(placeholderVideoTrack, placeholderStream);
-  //remoteStream = new MediaStream();
-  //remoteStream.addTrack(placeholderVideoTrack);
-  updateVideoElements();
-  console.log('DONE');
-}
-*/
-
 // Create placeholder audio
 const placeholderAudioStream = getPlaceholderAudioStream();
 placeholderAudioTrack = placeholderAudioStream.getAudioTracks()[0];
@@ -145,7 +116,7 @@ canvas.height = remoteVideo.offsetHeight;
 
 // Placeholder image load handler
 placeholder.onload = () => {
-  console.log('START');
+  console.log('Image load started');
   const ctx = canvas.getContext('2d');
   ctx.drawImage(placeholder, 0, 0, canvas.width, canvas.height);
   placeholderStream = canvas.captureStream(30);
@@ -156,7 +127,7 @@ placeholder.onload = () => {
   updateVideoElements(); 
   //localVideo.srcObject = placeholderStream;
   //remoteVideo.srcObject = placeholderStream;
-  console.log('DONE');
+  console.log('Image load done');
 }
 // Load image AFTER defining the onload habdler
 placeholder.src = 'assets/Tenna_screenshot_Technical_Difficulties.jpg';
@@ -169,10 +140,10 @@ testAudioVideo();
 pc.ontrack = (event) => {
   event.streams[0].getTracks().forEach((track) => {
     if (track.kind === 'audio') {
-      console.log('On track: audio stream added');
+      console.log('Audio track added');
     }
     if (track.kind === 'video') {
-      console.log('On track: video stream added');
+      console.log('Video track added');
     }
     remoteStream.addTrack(track);
   });
@@ -196,18 +167,16 @@ camButton.onclick = async () => {
     else {
       videoSender.replaceTrack(camTrack);
     }
-    console.log('TRACK REPLACED');
   }
   else {
     // If disabling camera:
     // Replace camera video track with placeholder
-    console.log('Removing video track...');
     videoSender.replaceTrack(placeholderVideoTrack);
   }
   // Confirm camera connectivity
   enableCam = !enableCam;
   enableShr = false;
-  console.log("Camera: ", enableCam ? "ON" : "OFF");
+  console.log('Camera: ', enableCam ? 'ON' : 'OFF');
   
   updateVideoElements();
   updateButtons();
@@ -224,31 +193,24 @@ micButton.onclick = async () => {
     const audioStream = enableShr ? getMixedAudioStream() : micStream;
     const audioTrack = audioStream.getTracks()[0];
     if (audioSender === null) {
-      console.log('Sharing: ', enableShr);
       audioSender = pc.addTrack(audioTrack, audioStream);
-      console.log('ADDED');
     }
     else {
-      console.log('Is null: ', audioTrack === null);
       audioSender.replaceTrack(audioTrack);
-      console.log('REPLACED');
     }
   }
   else {
-    console.log('Removing audio track...');
     if (enableShr) {
       // Screen sharing still enabled => leave screen audio track
       audioSender.replaceTrack(shrAudioTrack);
-      console.log('REDUCED');
     }
     else {
       // Microphone and screen sharing disabled => replace audio track with a placeholder
       audioSender.replaceTrack(placeholderAudioTrack);
-      console.log('REMOVED');
     }
   }
   enableMic = !enableMic;
-  console.log("Microphone: ", enableMic ? "ON" : "OFF");
+  console.log('Microphone: ', enableMic ? 'ON' : 'OFF');
   
   updateVideoElements();
   updateButtons();
@@ -306,7 +268,7 @@ shrButton.onclick = async () => {
   // Confirm screen sharing
   enableShr = !enableShr;
   enableCam = false;
-  console.log("Screen sharing: ", enableShr ? "ON" : "OFF");
+  console.log('Screen sharing: ', enableShr ? 'ON' : 'OFF');
 
   updateVideoElements();
   updateButtons();
@@ -317,9 +279,6 @@ shrButton.onclick = async () => {
 callButton.onclick = async () => {
   disableButtons();
   idDisplay.innerHTML = 'Creating call...';
-
-  const localVideoTracks = pc.getSenders().length;
-  console.log('Offer: local video tracks: ', localVideoTracks);
   
   // Reference Firestore collections for signaling
   // When document does not have an ID, Firestore creates one automatically
@@ -329,7 +288,6 @@ callButton.onclick = async () => {
 
   // Get candidates for caller, save to db
   pc.onicecandidate = (event) => {
-    console.log('Offer: on ICE Candidate');
     event.candidate && offerCandidates.add(event.candidate.toJSON());
   };
 
@@ -342,12 +300,10 @@ callButton.onclick = async () => {
     sdp: offerDescription.sdp
   };
 
-  console.log('Offer: ', offer)
-
   await callDoc.set({ offer });
   console.log('Offer added');
-  const localVideoTracks2 = pc.getSenders().length;
-  console.log('Offer: local video tracks: ', localVideoTracks2);
+  const localVideoTracks = pc.getSenders().length;
+  console.log('Offer sent. ', localVideoTracks, ' local video tracks');
 
   // Display call ID
   idDisplay.innerHTML = 'Your call ID: ' + callDoc.id;
@@ -407,10 +363,10 @@ joinButton.onclick = async () => {
     await pc.setRemoteDescription(new RTCSessionDescription(offerDescription));
 
     const remoteVideoTracks = pc.getReceivers().length;
-    console.log('Answer: remote video tracks: ', remoteVideoTracks);
+    console.log('Answer: ', remoteVideoTracks, ' remote video tracks');
 
     const answerDescription = await pc.createAnswer();
-    console.log("Answer: ", answerDescription);
+    console.log('Answer: ', answerDescription);
     await pc.setLocalDescription(answerDescription);
 
     const answer = {
@@ -422,7 +378,6 @@ joinButton.onclick = async () => {
 
     offerCandidates.onSnapshot((snapshot) => {
       snapshot.docChanges().forEach((change) => {
-        console.log('Offer added: ', change);
         if (change.type === 'added') {
           let data = change.doc.data();
           pc.addIceCandidate(new RTCIceCandidate(data));
@@ -526,6 +481,6 @@ function testAudioVideo() {
   const hasRemoteAudio = pc.getReceivers().some(r => r.track?.kind === 'audio');
   const hasRemoteVideo = pc.getReceivers().some(r => r.track?.kind === 'video');
 
-  console.log('LOCAL: audio = ', hasLocalAudio, ', video = ', hasLocalVideo);
-  console.log('REMOTE: audio = ', hasRemoteAudio, ', video = ', hasRemoteVideo);
+  console.log('LOCAL: audio: ', hasLocalAudio, '; video: ', hasLocalVideo);
+  console.log('REMOTE: audio: ', hasRemoteAudio, '; video: ', hasRemoteVideo);
 }
