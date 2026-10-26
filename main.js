@@ -28,24 +28,46 @@ const servers = {
   iceCandidatePoolSize: 10,
 };
 
-// Global State
+// Initialise RTC peer connection
 const pc = new RTCPeerConnection(servers);
-const pcSend = new RTCPeerConnection(servers);
-const pcReceive = new RTCPeerConnection(servers);
+
+// Detect mobile device
+const isMobileByWidth = window.matchMedia('(max-width: 768px)').matches;
+
+// Streams
 let localStream = null;
 let remoteStream = null;
+let placeholderStream = null;
+let micStream = null;
+let screenStream = null;
+let audioSender = null;
+let videoSender = null;
 
+// Tracks
+let camTrack = null;
+let micTrack = null;
+let placeholderVideoTrack = null;
+let placeholderAudioTrack = null;
+let shrVideoTrack = null;
+let shrAudioTrack = null;
+let mixedAudioTrack = null;
 
 // HTML elements
+const placeholder = document.getElementById('placeholder');
 const camButton = document.getElementById('camButton');
 const micButton = document.getElementById('micButton');
 const shrButton = document.getElementById('shrButton');
-const webcamVideo = document.getElementById('webcamVideo');
+const localVideo = document.getElementById('localVideo');
 const callButton = document.getElementById('callButton');
 const callInput = document.getElementById('callInput');
 const joinButton = document.getElementById('joinButton');
 const remoteVideo = document.getElementById('remoteVideo');
 const endButton = document.getElementById('endButton');
+const iconCam = document.getElementById('iconCam');
+const iconMic = document.getElementById('iconMic');
+const iconShr = document.getElementById('iconShr');
+const idDisplay = document.getElementById('idDisplay');
+const answerStatus = document.getElementById('answerStatus');
 
 // Button text elements
 const enMsg = "Enable ";
@@ -54,92 +76,260 @@ const camMsg = "Camera";
 const micMsg = "Microphone";
 const shrMsg = "Screen Sharing";
 
+// Assets
+const iconCamEnabled = 'assets/material-symbols--video-camera-front.svg';
+const iconCamDisabled = 'assets/material-symbols--video-camera-front-off.svg';
+const iconMicEnabled = 'assets/material-symbols--mic.svg';
+const iconMicDisabled = 'assets/material-symbols--mic-off.svg';
+const iconShrEnabled = 'assets/material-symbols--mimo-outline.svg';
+const iconShrDisabled = 'assets/material-symbols--mimo-disconnect-outline.svg';
+
+// Indicators
 let enableCam = false;
 let enableMic = false;
 let enableShr = false;
+let connected = false;
+let listenTriggered = false;
 
-// Initial setup
+// Noise cancellation configurations
 const noiseCancelConfig = {
   noiseSuppression: true,
   echoCancellation: true,
   autoGainControl: true
 };
-remoteStream = new MediaStream();
+
+// Listener for an empty call ID input
+callInput.addEventListener('input', (event) => {
+  let inputValue = event.target.value;
+  joinButton.disabled = inputValue.trim() === '';
+});
+
+// Placeholder animation setup
+/*
+video.src = 'assets/technical-difficulties-tenna.webm';
+video.width = remoteVideo.offsetWidth;
+video.height = remoteVideo.offsetHeight;
+video.loop = true;
+video.muted = true;
+video.playsInLine = true;
+*/
+
+// Start animation
+/*
+video.oncanplay = () => {
+  video.play();
+  console.log('LOOP');
+}
+
+// Initialise placeholder
+video.onplay = () => {
+  placeholderStream = video.captureStream ? video.captureStream() : video.mozCaptureStream();
+  placeholderVideoTrack = placeholderStream.getVideoTracks()[0];
+  videoSender = pc.addTrack(placeholderVideoTrack, placeholderStream);
+  //remoteStream = new MediaStream();
+  //remoteStream.addTrack(placeholderVideoTrack);
+  updateVideoElements();
+  console.log('DONE');
+}
+*/
+
+// Create placeholder audio
+const placeholderAudioStream = getPlaceholderAudioStream();
+placeholderAudioTrack = placeholderAudioStream.getAudioTracks()[0];
+audioSender = pc.addTrack(placeholderAudioTrack, placeholderAudioStream);
+
+// Create placeholder image
+const canvas = document.createElement('canvas');
+canvas.width = remoteVideo.offsetWidth;
+canvas.height = remoteVideo.offsetHeight;
+
+// Placeholder image load handler
+placeholder.onload = () => {
+  console.log('START');
+  const ctx = canvas.getContext('2d');
+  ctx.drawImage(placeholder, 0, 0, canvas.width, canvas.height);
+  placeholderStream = canvas.captureStream(30);
+  placeholderVideoTrack = placeholderStream.getVideoTracks()[0];
+  videoSender = pc.addTrack(placeholderVideoTrack, placeholderStream);
+  remoteStream = new MediaStream();
+  //remoteStream.addTrack(placeholderVideoTrack);
+  updateVideoElements(); 
+  //localVideo.srcObject = placeholderStream;
+  //remoteVideo.srcObject = placeholderStream;
+  console.log('DONE');
+}
+// Load image AFTER defining the onload habdler
+placeholder.src = 'assets/Tenna_screenshot_Technical_Difficulties.jpg';
+
 updateButtons();
+testAudioVideo();
+
+
+// Pull tracks from peer connection (remote stream), add to video stream
+pc.ontrack = (event) => {
+  event.streams[0].getTracks().forEach((track) => {
+    if (track.kind === 'audio') {
+      console.log('On track: audio stream added');
+    }
+    if (track.kind === 'video') {
+      console.log('On track: video stream added');
+    }
+    remoteStream.addTrack(track);
+  });
+  remoteVideo.srcObject = remoteStream;
+};
+
+
 
 // 1. Camera button press
 camButton.onclick = async () => {
-  // Change camera connectivity
-  localStream = 
-    !enableCam || enableMic ? 
-      await navigator.mediaDevices.getUserMedia({ 
-        video: !enableCam,
-        audio: enableMic ? noiseCancelConfig : false
-      }) :
-      new MediaStream();
-
+  if (!enableCam) {
+    // If enabling camera:
+    // Create camera video track
+    const camStream = await navigator.mediaDevices.getUserMedia({ video: true });
+    camTrack = camStream.getVideoTracks()[0];
+    
+    // Update peer connction with camera track
+    if (videoSender === null) {
+      videoSender = pc.addTrack(camTrack, camStream);
+    }
+    else {
+      videoSender.replaceTrack(camTrack);
+    }
+    console.log('TRACK REPLACED');
+  }
+  else {
+    // If disabling camera:
+    // Replace camera video track with placeholder
+    console.log('Removing video track...');
+    videoSender.replaceTrack(placeholderVideoTrack);
+  }
   // Confirm camera connectivity
   enableCam = !enableCam;
   enableShr = false;
   console.log("Camera: ", enableCam ? "ON" : "OFF");
   
-  updateStreams();
+  updateVideoElements();
   updateButtons();
+  testAudioVideo();
 };
 
 // 2. Microphone button press
 micButton.onclick = async () => {
-  // Change microphone connectivity
-  localStream = 
-    enableCam || !enableMic ? 
-      await navigator.mediaDevices.getUserMedia({ 
-        video: enableCam,
-        audio: !enableMic ? noiseCancelConfig : false
-      }) :
-      new MediaStream();
-  
-  // Confirm microphone connectivity
+  if (!enableMic) {
+    micStream = await navigator.mediaDevices.getUserMedia({ audio: noiseCancelConfig });
+    
+    // Screen sharing enabled => mix audio tracks
+    // Else use microphone audio track only
+    const audioStream = enableShr ? getMixedAudioStream() : micStream;
+    const audioTrack = audioStream.getTracks()[0];
+    if (audioSender === null) {
+      console.log('Sharing: ', enableShr);
+      audioSender = pc.addTrack(audioTrack, audioStream);
+      console.log('ADDED');
+    }
+    else {
+      console.log('Is null: ', audioTrack === null);
+      audioSender.replaceTrack(audioTrack);
+      console.log('REPLACED');
+    }
+  }
+  else {
+    console.log('Removing audio track...');
+    if (enableShr) {
+      // Screen sharing still enabled => leave screen audio track
+      audioSender.replaceTrack(shrAudioTrack);
+      console.log('REDUCED');
+    }
+    else {
+      // Microphone and screen sharing disabled => replace audio track with a placeholder
+      audioSender.replaceTrack(placeholderAudioTrack);
+      console.log('REMOVED');
+    }
+  }
   enableMic = !enableMic;
-  enableShr = false;
   console.log("Microphone: ", enableMic ? "ON" : "OFF");
   
-  updateStreams();
+  updateVideoElements();
   updateButtons();
+  testAudioVideo();
 };
 
 // 3. Screen sharing button press
 shrButton.onclick = async () => {
-  // Change screen sharing
-  localStream = 
-    !enableShr ?
-      await navigator.mediaDevices.getDisplayMedia({ 
-        video: true,
-        audio: true
-      }) :
-      new MediaStream();
+  if (!enableShr) {
+    screenStream = await navigator.mediaDevices.getDisplayMedia({ 
+      video: true,
+      audio: true
+    });
+
+    shrVideoTrack = screenStream.getVideoTracks()[0];
+    shrAudioTrack = screenStream.getAudioTracks()[0];
+    let mixedAudioStream = null;
+    if (enableMic) {
+      // If microphone enabled:
+      // Mix microphone audio with display audio
+      mixedAudioStream = getMixedAudioStream();
+      mixedAudioTrack = mixedAudioStream.getAudioTracks()[0];
+    }
+    else {
+      // Else: get display audio track only
+      mixedAudioTrack = screenStream.getAudioTracks()[0];
+    }
+
+    // Add audio and video tracks to peer connection
+    videoSender.replaceTrack(shrVideoTrack);
+    if (audioSender === null) {
+      audioSender = enableMic ? pc.addTrack(mixedAudioTrack, mixedAudioStream) : pc.addTrack(shrAudioTrack, screenStream);
+    }
+    else if (enableMic) {
+      // Microphone enabled => use mixed audio track
+      audioSender.replaceTrack(mixedAudioTrack);
+    }
+    else {
+      // Microphone disabled => use display audio track only
+      audioSender.replaceTrack(shrAudioTrack);
+    }
+  }
+  else {
+    videoSender.replaceTrack(placeholderVideoTrack);
+    if (enableMic) {
+      // Microphone still enabled => leave microphone audio track
+      audioSender.replaceTrack(micTrack);
+    }
+    else {
+      // Microphone and screen sharing disabled => replace audio track with a placeholder
+      audioSender.replaceTrack(placeholderAudioTrack);
+    }
+  }
 
   // Confirm screen sharing
   enableShr = !enableShr;
   enableCam = false;
-  enableMic = false;
   console.log("Screen sharing: ", enableShr ? "ON" : "OFF");
 
-  updateStreams();
+  updateVideoElements();
   updateButtons();
+  testAudioVideo();
 };
 
 // 4. Create an offer
 callButton.onclick = async () => {
+  disableButtons();
+  idDisplay.innerHTML = 'Creating call...';
+
+  const localVideoTracks = pc.getSenders().length;
+  console.log('Offer: local video tracks: ', localVideoTracks);
+  
   // Reference Firestore collections for signaling
+  // When document does not have an ID, Firestore creates one automatically
   const callDoc = firestore.collection('calls').doc();
   const offerCandidates = callDoc.collection('offerCandidates');
   const answerCandidates = callDoc.collection('answerCandidates');
 
-  // Display call ID
-  document.getElementById('idDisplay').innerHTML = 'Your call ID: ' + callDoc.id;
-
   // Get candidates for caller, save to db
   pc.onicecandidate = (event) => {
+    console.log('Offer: on ICE Candidate');
     event.candidate && offerCandidates.add(event.candidate.toJSON());
   };
 
@@ -148,11 +338,20 @@ callButton.onclick = async () => {
   await pc.setLocalDescription(offerDescription);
 
   const offer = {
-    sdp: offerDescription.sdp,
     type: offerDescription.type,
+    sdp: offerDescription.sdp
   };
 
+  console.log('Offer: ', offer)
+
   await callDoc.set({ offer });
+  console.log('Offer added');
+  const localVideoTracks2 = pc.getSenders().length;
+  console.log('Offer: local video tracks: ', localVideoTracks2);
+
+  // Display call ID
+  idDisplay.innerHTML = 'Your call ID: ' + callDoc.id;
+  enableButtons();
 
   // Listen for remote answer
   callDoc.onSnapshot((snapshot) => {
@@ -169,30 +368,34 @@ callButton.onclick = async () => {
       if (change.type === 'added') {
         const candidate = new RTCIceCandidate(change.doc.data());
         pc.addIceCandidate(candidate);
+        document.getElementById('callStatus').innerHTML = 'Connection established!';
       }
     });
+    if (!listenTriggered) {
+      connected = true;
+      console.log('connected = ', connected);
+      listenTriggered = true;
+    }
   });
-
-  document.getElementById('callButton').innerHTML = 'Created!';
-  callButton.disabled = true;
-  endButton.disabled = false;
 };
 
 // 5. Join the call with the unique ID
 joinButton.onclick = async () => {
+  disableButtons();
+  answerStatus.innerHTML = 'Searching...';
+  
   const callId = callInput.value;
   const callDoc = firestore.collection('calls').doc(callId);
-  const answerCandidates = callDoc.collection('answerCandidates');
   const offerCandidates = callDoc.collection('offerCandidates');
+  const answerCandidates = callDoc.collection('answerCandidates');
 
-  const snapshotAnswer = await answerCandidates.get();
   const snapshotOffer = await offerCandidates.get();
-  console.log(snapshotAnswer.size, snapshotOffer.size);
-  if (snapshotAnswer.size === 0 && snapshotOffer.size === 0) {
-    document.getElementById('answerStatus').innerHTML = 'Sorry, this call does not exist. Please try a different ID.';
+  console.log('Offers: ', snapshotOffer.size);
+  if (snapshotOffer.size === 0) {
+    answerStatus.innerHTML = 'Sorry, this call does not exist. Please try a different ID.';
   }
   else {
-    document.getElementById('answerStatus').innerHTML = 'Call found!';
+    answerStatus.innerHTML = 'Call found! Connecting...';
     pc.onicecandidate = (event) => {
       event.candidate && answerCandidates.add(event.candidate.toJSON());
     };
@@ -200,59 +403,129 @@ joinButton.onclick = async () => {
     const callData = (await callDoc.get()).data();
 
     const offerDescription = callData.offer;
+    console.log("Offer: ", offerDescription);
     await pc.setRemoteDescription(new RTCSessionDescription(offerDescription));
 
+    const remoteVideoTracks = pc.getReceivers().length;
+    console.log('Answer: remote video tracks: ', remoteVideoTracks);
+
     const answerDescription = await pc.createAnswer();
+    console.log("Answer: ", answerDescription);
     await pc.setLocalDescription(answerDescription);
 
     const answer = {
       type: answerDescription.type,
-      sdp: answerDescription.sdp,
+      sdp: answerDescription.sdp
     };
 
     await callDoc.update({ answer });
 
     offerCandidates.onSnapshot((snapshot) => {
       snapshot.docChanges().forEach((change) => {
-        console.log('Change: ', change);
+        console.log('Offer added: ', change);
         if (change.type === 'added') {
           let data = change.doc.data();
           pc.addIceCandidate(new RTCIceCandidate(data));
+          answerStatus.innerHTML = 'Connection established!';
         }
       });
+      if (!listenTriggered) {
+        enableButtons();
+        connected = true;
+        console.log('connected = ', connected);
+        listenTriggered = true;
+      }
     });
   }
 };
 
-async function updateStreams() {
-  // If camera, microphone, and screen sharing are disabled
-  if (!enableCam && !enableMic && !enableShr) {
-    // Stop the current tracks for the local stream
-    localStream.getTracks().forEach((track) => track.stop());
-    console.log('Tracks stopped!');
+// Create placeholder audio
+function getPlaceholderAudioStream() {
+  const audioContext = new AudioContext();
+  const osc = audioContext.createOscillator();
+  osc.frequency.value = 0;  // silent
+  const gainNode = audioContext.createGain();
+  gainNode.gain.value = 0; // zero volume
+  osc.connect(gainNode);
+  const audioStreamDestination = audioContext.createMediaStreamDestination();
+  osc.connect(audioStreamDestination);
+  osc.start();
+
+  return audioStreamDestination.stream;
+}
+
+function getMixedAudioStream() {
+  // Initialise web audio API
+  const audioContext = new AudioContext();
+  const destination = audioContext.createMediaStreamDestination();
+
+  // Connect microphone audio to the mixer
+  const micSource = audioContext.createMediaStreamSource(micStream);
+  micSource.connect(destination);
+
+  // Connect display audio to the mixer
+  const displayAudioSource = audioContext.createMediaStreamSource(screenStream);
+  displayAudioSource.connect(destination);
+
+  // Return audio stream from the mixer
+  return destination.stream;
+}
+
+async function updateVideoElements() {
+  // Push tracks from the active stream (camera / screen / placeholder) to local stream
+  localStream = new MediaStream();
+  if (enableCam) {
+    localStream.addTrack(camTrack);
+  }
+  else if (enableShr) {
+    localStream.addTrack(shrVideoTrack);
+  }
+  else {
+    localStream.addTrack(placeholderVideoTrack);
   }
 
-  // Push tracks from local stream to peer connection
-  localStream.getTracks().forEach((track) => {
-    pc.addTrack(track, localStream);
-  });
-
-  // Pull tracks from peer connection (remote stream), add to video stream
-  pc.ontrack = (event) => {
-    event.streams[0].getTracks().forEach((track) => {
-      remoteStream.addTrack(track);
-    });
-  };
-
   // Update the frontend components
-  webcamVideo.srcObject = localStream;
+  localVideo.srcObject = localStream;
   remoteVideo.srcObject = remoteStream;
 }
 
 async function updateButtons() {
-  document.getElementById('camButton').innerHTML = enableCam ? disMsg + camMsg : enMsg + camMsg;
-  document.getElementById('micButton').innerHTML = enableMic ? disMsg + micMsg : enMsg + micMsg;
-  document.getElementById('shrButton').innerHTML = enableShr ? disMsg + shrMsg : enMsg + shrMsg;
-  callButton.disabled = !enableCam && !enableMic && !enableShr;
-  joinButton.disabled = !enableCam && !enableMic && !enableShr;
+  // Update button text
+  camButton.innerHTML = enableCam ? disMsg + camMsg : enMsg + camMsg;
+  micButton.innerHTML = enableMic ? disMsg + micMsg : enMsg + micMsg;
+  shrButton.innerHTML = enableShr ? disMsg + shrMsg : enMsg + shrMsg;
+
+  // Update icons
+  iconCam.src = enableCam ? iconCamEnabled : iconCamDisabled;
+  iconMic.src = enableMic ? iconMicEnabled : iconMicDisabled;
+  iconShr.src = enableShr ? iconShrEnabled : iconShrDisabled;
+}
+
+async function enableButtons() {
+  camButton.disabled = false; 
+  micButton.disabled = false;
+  shrButton.disabled = false;
+  callButton.disabled = false;
+  joinButton.disabled = callInput.value.trim() === '';
+}
+
+async function disableButtons() {
+  camButton.disabled = true;
+  micButton.disabled = true;
+  shrButton.disabled = true;
+  callButton.disabled = true;
+  joinButton.disabled = true;
+}
+
+function testAudioVideo() {
+  // Local audio/video status
+  const hasLocalAudio = pc.getSenders().some(s => s.track?.kind === 'audio');
+  const hasLocalVideo = pc.getSenders().some(s => s.track?.kind === 'video');
+
+  // Remote audio/video status
+  const hasRemoteAudio = pc.getReceivers().some(r => r.track?.kind === 'audio');
+  const hasRemoteVideo = pc.getReceivers().some(r => r.track?.kind === 'video');
+
+  console.log('LOCAL: audio = ', hasLocalAudio, ', video = ', hasLocalVideo);
+  console.log('REMOTE: audio = ', hasRemoteAudio, ', video = ', hasRemoteVideo);
 }

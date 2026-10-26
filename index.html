@@ -6,15 +6,29 @@
     <title>WebRTC Chat</title>
   </head>
   <body>
+    <video id="placeholder2" autoplay muted playsinline loop hidden>
+      <source src="assets/technical-difficulties-tenna.webm" type="video/webm">
+    </video>
+    <img id="placeholder" hidden>
     <h2>Start your Camera and Microphone</h2>
     <div class="videos">
       <span>
         <h3>Your Stream</h3>
-        <video id="webcamVideo" autoplay playsinline></video>
+        <video id="localVideo" autoplay playsinline></video>
+        <div>
+          <img id="iconCam" height="50">
+          <img id="iconMic" height="50">
+          <img id="iconShr" height="50">
+        </div>
       </span>
       <span>
         <h3>Remote Stream</h3>
         <video id="remoteVideo" autoplay playsinline></video>
+        <div>
+          <img id="iconCam" height="50">
+          <img id="iconMic" height="50">
+          <img id="iconShr" height="50">
+        </div>
       </span>
     </div>
 
@@ -24,8 +38,9 @@
       <button id="shrButton">
     </div>
     <h2>Create a Call</h2>
-    <button id="callButton" disabled>Create</button>
+    <button id="callButton">Create</button>
     <p id="idDisplay"></p>
+    <p id="callStatus"></p>
 
     <h2>Join the Call</h2>
     <p>Join the call from a different browser window or device</p>
