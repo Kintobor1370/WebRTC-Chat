@@ -122,11 +122,9 @@ placeholder.onload = () => {
   placeholderStream = canvas.captureStream(30);
   placeholderVideoTrack = placeholderStream.getVideoTracks()[0];
   videoSender = pc.addTrack(placeholderVideoTrack, placeholderStream);
-  remoteStream = new MediaStream();
+  remoteStream = new MediaStream(); 
   //remoteStream.addTrack(placeholderVideoTrack);
-  updateVideoElements(); 
-  //localVideo.srcObject = placeholderStream;
-  //remoteVideo.srcObject = placeholderStream;
+  updateVideoElements();
   console.log('Image load done');
 }
 // Load image AFTER defining the onload habdler
@@ -145,8 +143,11 @@ pc.ontrack = (event) => {
     if (track.kind === 'video') {
       console.log('Video track added');
     }
+    // Add remote tracks to the remote stream
     remoteStream.addTrack(track);
   });
+
+  // Update the remote stream front-end component
   remoteVideo.srcObject = remoteStream;
 };
 
@@ -162,15 +163,18 @@ camButton.onclick = async () => {
     
     // Update peer connction with camera track
     if (videoSender === null) {
+      console.log('ADD VIDEO TRACK');
       videoSender = pc.addTrack(camTrack, camStream);
     }
     else {
+      console.log('REPLACE VIDEO TRACK');
       videoSender.replaceTrack(camTrack);
     }
   }
   else {
     // If disabling camera:
     // Replace camera video track with placeholder
+    //videoSender.replaceTrack(null);
     videoSender.replaceTrack(placeholderVideoTrack);
   }
   // Confirm camera connectivity
@@ -242,7 +246,9 @@ shrButton.onclick = async () => {
     // Add audio and video tracks to peer connection
     videoSender.replaceTrack(shrVideoTrack);
     if (audioSender === null) {
-      audioSender = enableMic ? pc.addTrack(mixedAudioTrack, mixedAudioStream) : pc.addTrack(shrAudioTrack, screenStream);
+      audioSender = enableMic ? 
+        pc.addTrack(mixedAudioTrack, mixedAudioStream) : 
+        pc.addTrack(shrAudioTrack, screenStream);
     }
     else if (enableMic) {
       // Microphone enabled => use mixed audio track
@@ -433,15 +439,11 @@ async function updateVideoElements() {
     localStream.addTrack(camTrack);
   }
   else if (enableShr) {
-    localStream.addTrack(shrVideoTrack);
-  }
-  else {
-    localStream.addTrack(placeholderVideoTrack);
+    localStream.addTrack(shrVideoTrack); 
   }
 
-  // Update the frontend components
+  // Update the frontend component
   localVideo.srcObject = localStream;
-  remoteVideo.srcObject = remoteStream;
 }
 
 async function updateButtons() {
