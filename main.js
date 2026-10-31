@@ -28,8 +28,8 @@ const servers = {
   iceCandidatePoolSize: 10,
 };
 
-// Initialise RTC peer connection
-const pc = new RTCPeerConnection(servers);
+// Peer connection
+let pc = new RTCPeerConnection(servers);
 
 // Detect mobile device
 const isMobileByWidth = window.matchMedia('(max-width: 768px)').matches;
@@ -60,7 +60,6 @@ const shrButton = document.getElementById('shrButton');
 const localVideo = document.getElementById('localVideo');
 const callButton = document.getElementById('callButton');
 const callInput = document.getElementById('callInput');
-const joinButton = document.getElementById('joinButton');
 const remoteVideo = document.getElementById('remoteVideo');
 const endButton = document.getElementById('endButton');
 const iconCam = document.getElementById('iconCam');
@@ -91,6 +90,9 @@ let enableShr = false;
 let connected = false;
 let listenTriggered = false;
 
+// Call ID
+let callId = null;
+
 // Noise cancellation configurations
 const noiseCancelConfig = {
   noiseSuppression: true,
@@ -100,6 +102,8 @@ const noiseCancelConfig = {
 
 // Listener for an empty call ID input
 callInput.addEventListener('input', (event) => {
+  // Reset the answer status after a change to call ID input
+  answerStatus.innerHTML = '';
   let inputValue = event.target.value;
   joinButton.disabled = inputValue.trim() === '';
 });
@@ -107,7 +111,6 @@ callInput.addEventListener('input', (event) => {
 // Create placeholder audio
 const placeholderAudioStream = getPlaceholderAudioStream();
 placeholderAudioTrack = placeholderAudioStream.getAudioTracks()[0];
-audioSender = pc.addTrack(placeholderAudioTrack, placeholderAudioStream);
 
 // Create placeholder image
 const canvas = document.createElement('canvas');
@@ -116,41 +119,16 @@ canvas.height = remoteVideo.offsetHeight;
 
 // Placeholder image load handler
 placeholder.onload = () => {
-  console.log('Image load started');
+  console.log('Placeholder image load started');
   const ctx = canvas.getContext('2d');
   ctx.drawImage(placeholder, 0, 0, canvas.width, canvas.height);
   placeholderStream = canvas.captureStream(30);
   placeholderVideoTrack = placeholderStream.getVideoTracks()[0];
-  videoSender = pc.addTrack(placeholderVideoTrack, placeholderStream);
-  remoteStream = new MediaStream(); 
-  //remoteStream.addTrack(placeholderVideoTrack);
-  updateVideoElements();
-  console.log('Image load done');
+  initializePeerConnectionSettings();
+  console.log('Placeholder image load done');
 }
-// Load image AFTER defining the onload habdler
+// Load image AFTER defining the onload handler
 placeholder.src = 'assets/Tenna_screenshot_Technical_Difficulties.jpg';
-
-updateButtons();
-testAudioVideo();
-
-
-// Pull tracks from peer connection (remote stream), add to video stream
-pc.ontrack = (event) => {
-  event.streams[0].getTracks().forEach((track) => {
-    if (track.kind === 'audio') {
-      console.log('Audio track added');
-    }
-    if (track.kind === 'video') {
-      console.log('Video track added');
-    }
-    // Add remote tracks to the remote stream
-    remoteStream.addTrack(track);
-  });
-
-  // Update the remote stream front-end component
-  remoteVideo.srcObject = remoteStream;
-};
-
 
 
 // 1. Camera button press
@@ -161,7 +139,7 @@ camButton.onclick = async () => {
     const camStream = await navigator.mediaDevices.getUserMedia({ video: true });
     camTrack = camStream.getVideoTracks()[0];
     
-    // Update peer connction with camera track
+    // Update the peer connection with camera track
     if (videoSender === null) {
       console.log('ADD VIDEO TRACK');
       videoSender = pc.addTrack(camTrack, camStream);
@@ -175,6 +153,7 @@ camButton.onclick = async () => {
     // If disabling camera:
     // Replace camera video track with placeholder
     //videoSender.replaceTrack(null);
+    console.log('PLACEHODLER VIDEO TRACK');
     videoSender.replaceTrack(placeholderVideoTrack);
   }
   // Confirm camera connectivity
@@ -186,6 +165,7 @@ camButton.onclick = async () => {
   updateButtons();
   testAudioVideo();
 };
+
 
 // 2. Microphone button press
 micButton.onclick = async () => {
@@ -220,6 +200,7 @@ micButton.onclick = async () => {
   updateButtons();
   testAudioVideo();
 };
+
 
 // 3. Screen sharing button press
 shrButton.onclick = async () => {
@@ -281,6 +262,7 @@ shrButton.onclick = async () => {
   testAudioVideo();
 };
 
+
 // 4. Create an offer
 callButton.onclick = async () => {
   disableButtons();
@@ -289,6 +271,7 @@ callButton.onclick = async () => {
   // Reference Firestore collections for signaling
   // When document does not have an ID, Firestore creates one automatically
   const callDoc = firestore.collection('calls').doc();
+  callId = callDoc.id;
   const offerCandidates = callDoc.collection('offerCandidates');
   const answerCandidates = callDoc.collection('answerCandidates');
 
@@ -312,8 +295,10 @@ callButton.onclick = async () => {
   console.log('Offer sent. ', localVideoTracks, ' local video tracks');
 
   // Display call ID
-  idDisplay.innerHTML = 'Your call ID: ' + callDoc.id;
+  idDisplay.innerHTML = 'Your call ID: ' + callId;
   enableButtons();
+  callButton.disabled = true;
+  joinButton.disabled = true;
 
   // Listen for remote answer
   callDoc.onSnapshot((snapshot) => {
@@ -339,66 +324,197 @@ callButton.onclick = async () => {
       listenTriggered = true;
     }
   });
+
+  // Listen for end of the call
+  callDoc.onSnapshot((doc) => {
+    if (!doc.exists) {
+      endCall();
+      idDisplay.innerHTML = 'Other user has ended the call.';
+    }
+  });
 };
+
 
 // 5. Join the call with the unique ID
 joinButton.onclick = async () => {
   disableButtons();
   answerStatus.innerHTML = 'Searching...';
   
-  const callId = callInput.value;
-  const callDoc = firestore.collection('calls').doc(callId);
+  const inputId = callInput.value;
+  
+  // If the offer sender tries to answer their own offer
+  if (inputId === callId) {
+    answerStatus.innerHTML = 'You are already connected to this call.';
+    enableButtons();
+    return;
+  }
+
+  const callDoc = firestore.collection('calls').doc(inputId);
+
+  const snapshot = await callDoc.get();
+  // if the offer was not created yet
+  if (!snapshot.exists) {
+    // Display the notification
+    answerStatus.innerHTML = 'Sorry, this call does not exist. Please try a different ID.';
+    enableButtons();
+    return;
+  }
+
+  const data = snapshot.data();
+  for (const [key, value] of Object.entries(data)) {
+    // if another user has already answered the call:
+    if (key === 'answer') {
+      // Display the notification
+      answerStatus.innerHTML = 'Sorry, another user has already answered this call. Please try a different ID.';
+      enableButtons();
+      return;
+    }
+  }
+  answerStatus.innerHTML = 'Call found! Connecting...';
+
   const offerCandidates = callDoc.collection('offerCandidates');
   const answerCandidates = callDoc.collection('answerCandidates');
+  pc.onicecandidate = (event) => {
+    event.candidate && answerCandidates.add(event.candidate.toJSON());
+  };
 
-  const snapshotOffer = await offerCandidates.get();
-  console.log('Offers: ', snapshotOffer.size);
-  if (snapshotOffer.size === 0) {
-    answerStatus.innerHTML = 'Sorry, this call does not exist. Please try a different ID.';
-  }
-  else {
-    answerStatus.innerHTML = 'Call found! Connecting...';
-    pc.onicecandidate = (event) => {
-      event.candidate && answerCandidates.add(event.candidate.toJSON());
-    };
+  const callData = (await callDoc.get()).data();
 
-    const callData = (await callDoc.get()).data();
+  const offerDescription = callData.offer;
+  console.log("Offer: ", offerDescription);
+  await pc.setRemoteDescription(new RTCSessionDescription(offerDescription));
 
-    const offerDescription = callData.offer;
-    console.log("Offer: ", offerDescription);
-    await pc.setRemoteDescription(new RTCSessionDescription(offerDescription));
+  const numRemoteTracks = pc.getReceivers().length;
+  console.log('Answer: ', numRemoteTracks, ' remote tracks');
 
-    const remoteVideoTracks = pc.getReceivers().length;
-    console.log('Answer: ', remoteVideoTracks, ' remote video tracks');
+  const answerDescription = await pc.createAnswer();
+  console.log('Descriprion: ', answerDescription);
+  await pc.setLocalDescription(answerDescription);
 
-    const answerDescription = await pc.createAnswer();
-    console.log('Answer: ', answerDescription);
-    await pc.setLocalDescription(answerDescription);
+  const answer = {
+    type: answerDescription.type,
+    sdp: answerDescription.sdp
+  };
 
-    const answer = {
-      type: answerDescription.type,
-      sdp: answerDescription.sdp
-    };
+  await callDoc.update({ answer });
 
-    await callDoc.update({ answer });
-
-    offerCandidates.onSnapshot((snapshot) => {
-      snapshot.docChanges().forEach((change) => {
-        if (change.type === 'added') {
-          let data = change.doc.data();
-          pc.addIceCandidate(new RTCIceCandidate(data));
-          answerStatus.innerHTML = 'Connection established!';
-        }
-      });
-      if (!listenTriggered) {
-        enableButtons();
-        connected = true;
-        console.log('connected = ', connected);
-        listenTriggered = true;
+  offerCandidates.onSnapshot((snapshot) => {
+    snapshot.docChanges().forEach((change) => {
+      if (change.type === 'added') {
+        let data = change.doc.data();
+        pc.addIceCandidate(new RTCIceCandidate(data));
+        answerStatus.innerHTML = 'Connection established!';
       }
     });
-  }
+    if (!listenTriggered) {
+      callId = inputId;
+      enableButtons();
+      callButton.disabled = true;
+      joinButton.disabled = true;
+      connected = true;
+      console.log('connected = ', connected);
+      listenTriggered = true;
+    }
+  });
+
+  // Listen for end of the call
+  callDoc.onSnapshot((doc) => {
+    if (!doc.exists) {
+      endCall();
+      idDisplay.innerHTML = 'Other user has ended the call.';
+    }
+  });
 };
+
+
+// 6. End the call and delete its document from Firestore
+endButton.onclick = async () => {
+  endCall(true);
+}
+
+
+// End the call (with or without deleting call data)
+async function endCall(deleteDoc = false) {
+  disableButtons();
+  idDisplay.innerHTML = 'Ending call...';
+
+  if (deleteDoc) {
+    const callDoc = firestore.collection('calls').doc(callId);
+    await callDoc.delete();
+    console.log('Call data deleted');
+  }
+    
+  // Close the existing peer connection and create a new instance
+  pc.close();
+  pc = new RTCPeerConnection(servers);
+  initializePeerConnectionSettings();
+  updateVideoElements();
+  
+  idDisplay.innerHTML = '';
+  callInput.value = '';
+  document.getElementById('callStatus').innerHTML = '';
+  answerStatus.innerHTML = '';
+  console.log('Call ended');
+  enableButtons();
+}
+
+
+// Initialize RTC peer connection settings
+function initializePeerConnectionSettings() {
+  // Reset streams
+  remoteStream = new MediaStream();
+  micStream = null;
+  screenStream = null;
+
+  // Reset tracks
+  camTrack = null;
+  micTrack = null;
+  shrVideoTrack = null;
+  shrAudioTrack = null;
+  mixedAudioTrack = null;
+
+  // Reset indicators
+  enableCam = false;
+  enableMic = false;
+  enableShr = false;
+  connected = false;
+  listenTriggered = false;
+
+  // Reset call ID
+  callId = null;
+
+  // Reset local and remote stream screens
+  localVideo.srcObject = null;
+  remoteVideo.srcObject = null;
+
+  // Reset senders
+  audioSender = pc.addTrack(placeholderAudioTrack, placeholderAudioStream);
+  videoSender = pc.addTrack(placeholderVideoTrack, placeholderStream);
+
+  // Pull tracks from peer connection (remote stream), add to video stream
+  pc.ontrack = (event) => {
+    console.log('ON TRACK');
+    event.streams[0].getTracks().forEach((track) => {
+      // DEBUG
+      console.log('Track added');
+      console.log('   ID:      ', track.id);
+      console.log('   Label:   ', track.label);
+      console.log('   Kind:    ', track.kind);
+      console.log('   Enabled: ', track.enabled);
+      console.log('   RS:      ', track.readyState);
+
+      // Add remote tracks to the remote stream
+      remoteStream.addTrack(track);
+    });
+
+    // Update the remote stream front-end component
+    remoteVideo.srcObject = remoteStream;
+  };
+
+  updateButtons();
+  testAudioVideo();
+}
+
 
 // Create placeholder audio
 function getPlaceholderAudioStream() {
@@ -415,6 +531,8 @@ function getPlaceholderAudioStream() {
   return audioStreamDestination.stream;
 }
 
+
+// Mix audio from microphone and screen sharing into a new audio stream
 function getMixedAudioStream() {
   // Initialise web audio API
   const audioContext = new AudioContext();
@@ -432,6 +550,7 @@ function getMixedAudioStream() {
   return destination.stream;
 }
 
+// Update front-end video elements
 async function updateVideoElements() {
   // Push tracks from the active stream (camera / screen / placeholder) to local stream
   localStream = new MediaStream();
@@ -441,12 +560,16 @@ async function updateVideoElements() {
   else if (enableShr) {
     localStream.addTrack(shrVideoTrack); 
   }
+  else {
+    localStream.addTrack(placeholderVideoTrack);
+  }
 
   // Update the frontend component
   localVideo.srcObject = localStream;
 }
 
-async function updateButtons() {
+// Update button availability
+function updateButtons() {
   // Update button text
   camButton.innerHTML = enableCam ? disMsg + camMsg : enMsg + camMsg;
   micButton.innerHTML = enableMic ? disMsg + micMsg : enMsg + micMsg;
@@ -458,22 +581,27 @@ async function updateButtons() {
   iconShr.src = enableShr ? iconShrEnabled : iconShrDisabled;
 }
 
-async function enableButtons() {
+// Enable buttons
+function enableButtons() {
   camButton.disabled = false; 
   micButton.disabled = false;
   shrButton.disabled = false;
   callButton.disabled = false;
   joinButton.disabled = callInput.value.trim() === '';
+  endButton.disabled = callId === null;
 }
 
-async function disableButtons() {
+// Disable buttons
+function disableButtons() {
   camButton.disabled = true;
   micButton.disabled = true;
   shrButton.disabled = true;
   callButton.disabled = true;
   joinButton.disabled = true;
+  endButton.disabled = true;
 }
 
+// Test audio and video streams
 function testAudioVideo() {
   // Local audio/video status
   const hasLocalAudio = pc.getSenders().some(s => s.track?.kind === 'audio');
